@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException, File, UploadFile, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 from workflow.process_flow import run_workflow
-from tools.utils import save_upload_file
+from tools.utils import save_upload_file, extract_medical_information
 from uuid import uuid4
 import asyncio
 import glob
@@ -79,3 +79,22 @@ async def download_file(transaction_id: str, filename: str):
         raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(path=file_path, media_type="video/mp4", filename=filename)
+
+
+@router.post("/healthcare-extraction", description="Extract healthcare information from text/file upload.")
+async def healthcare_transaction(
+    file: UploadFile = File(..., description=".txt file having conversation between patient and doctor")
+    ):
+    """
+    Ability to extract jsonyable content from conversation.
+    """
+    
+    if not file:
+        raise HTTPException(status_code=400, detail="One of file or conversation must be provided")
+    if file:
+        if file.content_type != "text/plain":
+            raise HTTPException(status_code=400, detail="File must be a .txt file")
+        file_content = await file.read()
+        query = file_content.decode("utf-8")
+    response = await extract_medical_information(query)
+    return {"response": response}

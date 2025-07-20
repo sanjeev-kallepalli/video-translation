@@ -3,6 +3,18 @@ import shutil
 import time
 import asyncio
 from googletrans import Translator
+from fastapi import HTTPException
+from openai import OpenAI
+import copy
+import json
+from tools.prompt import healthcare_extraction_prompt
+
+
+healthcare_prompt = [
+                {"role": "system", "content": f"You are a clinical assistant. Given a transcript of a conversation between a doctor and a patient, extract the relevant medical entities in structured JSON format. "},
+                {"role": "user", "content": healthcare_extraction_prompt}
+            ]
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 
 def save_upload_file(upload_file, destination_folder="output"):
@@ -69,3 +81,33 @@ def generate_subtitle_file(translated_text, output_file):
             f.write(f"{idx + 1}\n")
             f.write(f"{start_time} --> {end_time}\n")
             f.write(f"{text}\n\n")
+
+
+async def extract_medical_information(query, model="gpt-4o", temperature=0.0, prompt=healthcare_prompt):
+    try:
+        print(f"Invoking LLM with general query: {query}")
+        prompt_type = copy.deepcopy(prompt)
+        # Replace {query} in the prompt with the actual query
+        for msg in prompt_type:
+            if msg["role"] == "user":
+                msg["content"] = msg["content"].replace("{query}", query)
+        response = client.chat.completions.create(
+            model=model,
+            messages=prompt_type,
+            temperature=temperature
+        )
+        raw = response.choices[0].message.content.strip()
+
+        # Strip markdown block ```json\n...\n```
+        if raw.startswith("```json"):
+            raw = raw.removeprefix("```json").removesuffix("```").strip()
+        elif raw.startswith("```"):
+            raw = raw.removeprefix("```").removesuffix("```").strip()
+
+        parsed = json.loads(raw)
+        print(parsed["symptoms"])
+        return parsed
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
